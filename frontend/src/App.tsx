@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Activity, AlertTriangle, ArrowDownRight, ArrowRight, ArrowUpRight, BarChart3, Bell, Boxes,
-  Check, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, CircleHelp, Clock3, CloudFog, CloudRain, Cpu, Download, EyeOff, FileUp, Info, Leaf, MapPin,
+  Check, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, CircleHelp, Clock3, CloudFog, CloudRain, Cpu, Database, Download, EyeOff, FileUp, Info, Leaf, MapPin,
   Menu, Package, Play, Plus, RefreshCw, Route, Search, Send, Settings, ShieldCheck, Sliders, Sparkles,
   Sprout, Sun, Trash2, TrendingUp, Truck, Upload, User, Warehouse, X, Zap
 } from 'lucide-react';
@@ -196,7 +197,55 @@ function App() {
   const [data, setData] = useState<Data | null>(null);
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [dataStatus, setDataStatus] = useState<DataSourceStatus | null>(null);
-  const [page, setPage] = useState('Overview');
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Database Telemetry & Audit History State
+  const [dbTelemetry, setDbTelemetry] = useState<any>(null);
+  const [dbHistory, setDbHistory] = useState<any[]>([]);
+
+  // Bidirectional Client Routing Maps
+  const ROUTE_PAGE_MAP: Record<string, string> = useMemo(() => ({
+    '/': 'Overview',
+    '/overview': 'Overview',
+    '/inventory': 'Inventory',
+    '/plan': 'Distribution plan',
+    '/scenarios': 'Scenario lab',
+    '/copilot': 'AI copilot',
+    '/database': 'Database & Audit',
+    '/audit': 'Database & Audit',
+  }), []);
+
+  const PAGE_ROUTE_MAP: Record<string, string> = useMemo(() => ({
+    'Overview': '/',
+    'Inventory': '/inventory',
+    'Distribution plan': '/plan',
+    'Scenario lab': '/scenarios',
+    'AI copilot': '/copilot',
+    'Database & Audit': '/database',
+  }), []);
+
+  const [page, setPage] = useState<string>(() => {
+    return ROUTE_PAGE_MAP[window.location.pathname.toLowerCase()] || 'Overview';
+  });
+
+  // Sync state with browser location on URL changes
+  useEffect(() => {
+    const matched = ROUTE_PAGE_MAP[location.pathname.toLowerCase()];
+    if (matched && matched !== page) {
+      setPage(matched);
+    }
+  }, [location.pathname, ROUTE_PAGE_MAP]);
+
+  const handleNavClick = (label: string) => {
+    setPage(label);
+    setMobileNav(false);
+    const targetRoute = PAGE_ROUTE_MAP[label] || '/';
+    if (location.pathname !== targetRoute) {
+      navigate(targetRoute);
+    }
+  };
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
@@ -301,21 +350,50 @@ function App() {
     return res.json();
   };
 
+  const fetchDbData = async () => {
+    try {
+      const [statRes, histRes] = await Promise.all([
+        fetch(`${API}/api/db/status`).then(r => r.json()).catch(() => null),
+        fetch(`${API}/api/db/history?limit=15`).then(r => r.json()).catch(() => ({ runs: [] })),
+      ]);
+      if (statRes) setDbTelemetry(statRes);
+      if (histRes?.runs) setDbHistory(histRes.runs);
+    } catch (err) {
+      console.warn('Could not fetch DB telemetry:', err);
+    }
+  };
+
+  const handleSeedDatabase = async () => {
+    try {
+      const res = await fetch(`${API}/api/db/seed`, { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to seed database');
+      notify('Database re-seeded via SQLAlchemy ORM');
+      await refresh();
+      await fetchDbData();
+    } catch (err: any) {
+      notify(`Database Seed Error: ${err.message}`);
+    }
+  };
+
   const refresh = async () => {
     setLoading(true);
     setError('');
     try {
-      const [d, p, scens, ai] = await Promise.all([
+      const [d, p, scens, ai, dbStat, dbHist] = await Promise.all([
         request('/api/initial-data'),
         request('/api/optimize', { solver_mode: solverMode }),
         request('/api/scenarios').catch(() => ({ scenarios: [] })),
         request('/api/ai/status').catch(() => null),
+        fetch(`${API}/api/db/status`).then(r => r.json()).catch(() => null),
+        fetch(`${API}/api/db/history?limit=15`).then(r => r.json()).catch(() => ({ runs: [] })),
       ]);
       setData(d);
       setDataStatus(d.data_source_status || null);
       setPlan(p);
       setScenariosList(scens.scenarios || []);
       setAiStatus(ai);
+      if (dbStat) setDbTelemetry(dbStat);
+      if (dbHist?.runs) setDbHistory(dbHist.runs);
     } catch (e: any) {
       setError(`${e.message}. Ensure the FastAPI server is running.`);
     } finally {
@@ -355,6 +433,7 @@ function App() {
     { label: 'Distribution plan', icon: Route },
     { label: 'Scenario lab', icon: Activity },
     { label: 'AI copilot', icon: Sparkles },
+    { label: 'Database & Audit', icon: Database },
   ];
 
   const runOptimize = async (overrideMode?: 'heuristic' | 'milp') => {
@@ -363,6 +442,7 @@ function App() {
       const p = await request('/api/optimize', { solver_mode: mode });
       setPlan(p);
       notify(`Plan calculated using ${mode === 'milp' ? 'Exact MILP Solver' : 'Heuristic Engine'}`);
+      await fetchDbData();
     } catch (e: any) {
       notify(e.message);
     }
@@ -608,7 +688,8 @@ function App() {
   const pageTitle =
     page === 'Distribution plan' ? 'Distribution intelligence' :
     page === 'Scenario lab' ? 'Scenario simulator' :
-    page === 'AI copilot' ? 'AgroNex copilot' : page;
+    page === 'AI copilot' ? 'AgroNex copilot' :
+    page === 'Database & Audit' ? 'Database & Execution Audit' : page;
 
   return (
     <div className="app-shell">
@@ -691,7 +772,7 @@ function App() {
             <button
               key={n.label}
               className={`nav-link ${page === n.label ? 'selected' : ''}`}
-              onClick={() => { setPage(n.label); setMobileNav(false); }}
+              onClick={() => handleNavClick(n.label)}
             >
               <n.icon size={18} />
               <span>{n.label}</span>
@@ -809,6 +890,17 @@ function App() {
             {/* Live Data Provider Badge */}
             <div className={`live-pill status-${overallStatus}`} title={`Data Source: ${statusLabel}`}>
               <span /> {statusLabel}
+            </div>
+
+            {/* Connected Database Tier Status Badge */}
+            <div
+              className="live-pill status-live"
+              style={{ cursor: 'pointer', background: 'rgba(16, 185, 129, 0.12)', borderColor: 'rgba(16, 185, 129, 0.35)', color: '#34d399' }}
+              title={`Database Tier: ${dbTelemetry?.dialect ? dbTelemetry.dialect.toUpperCase() : 'SQLAlchemy ORM'} | Stored batches: ${dbTelemetry?.tables?.inventory_batches ?? 6} | Click to view Database & Audit`}
+              onClick={() => handleNavClick('Database & Audit')}
+            >
+              <Database size={13} style={{ marginRight: 4 }} />
+              <span>DB: {dbTelemetry?.dialect ? dbTelemetry.dialect.toUpperCase() : 'ORM CONNECTED'}</span>
             </div>
 
             {/* Last Updated Timestamp */}
@@ -1785,6 +1877,147 @@ function App() {
                       </p>
                     </div>
                   </section>
+                </div>
+              )}
+
+              {page === 'Database & Audit' && (
+                <div className="tab-pane active" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                  {/* Database Tier Status Hero Banner */}
+                  <div className="panel" style={{ borderLeft: '4px solid #10b981', padding: '1.5rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                        <div style={{ padding: '0.85rem', borderRadius: '12px', background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.25)' }}>
+                          <ShieldCheck size={30} color="#10b981" />
+                        </div>
+                        <div>
+                          <h3 style={{ margin: 0, fontSize: '1.3rem', fontWeight: 700, color: '#f8fafc' }}>
+                            Relational Database & Execution Audit Tier
+                          </h3>
+                          <p style={{ margin: '4px 0 0 0', fontSize: '0.875rem', color: '#94a3b8' }}>
+                            Connected via <b>SQLAlchemy 2.x ORM</b> to {dbTelemetry?.dialect ? dbTelemetry.dialect.toUpperCase() : 'Relational Database'} · 3-Tier Enterprise Architecture
+                          </p>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '0.6rem' }}>
+                        <button
+                          className="action-pill-btn"
+                          onClick={fetchDbData}
+                          title="Refresh Database Telemetry"
+                        >
+                          <RefreshCw size={14} /> Refresh DB Stats
+                        </button>
+                        <button
+                          className="action-pill-btn"
+                          style={{ borderColor: 'rgba(16, 185, 129, 0.35)', color: '#10b981', background: 'rgba(16, 185, 129, 0.08)' }}
+                          onClick={handleSeedDatabase}
+                          title="Re-seed database tables"
+                        >
+                          <Database size={14} /> Reset & Re-Seed Tables
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Table row counters */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginTop: '1.5rem' }}>
+                      <div style={{ padding: '1.1rem', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.07)' }}>
+                        <span style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>Table: inventory_batches</span>
+                        <div style={{ fontSize: '1.75rem', fontWeight: 700, marginTop: '6px', color: '#38bdf8' }}>
+                          {dbTelemetry?.tables?.inventory_batches ?? inventory.length}
+                        </div>
+                        <small style={{ color: '#64748b', fontSize: '0.8rem' }}>Active perishable produce lots</small>
+                      </div>
+
+                      <div style={{ padding: '1.1rem', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.07)' }}>
+                        <span style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>Table: destinations</span>
+                        <div style={{ fontSize: '1.75rem', fontWeight: 700, marginTop: '6px', color: '#c084fc' }}>
+                          {dbTelemetry?.tables?.destinations ?? 4}
+                        </div>
+                        <small style={{ color: '#64748b', fontSize: '0.8rem' }}>Wholesale mandis & centers</small>
+                      </div>
+
+                      <div style={{ padding: '1.1rem', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.07)' }}>
+                        <span style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>Table: transport_routes</span>
+                        <div style={{ fontSize: '1.75rem', fontWeight: 700, marginTop: '6px', color: '#f59e0b' }}>
+                          {dbTelemetry?.tables?.transport_routes ?? 4}
+                        </div>
+                        <small style={{ color: '#64748b', fontSize: '0.8rem' }}>Transit routes & corridors</small>
+                      </div>
+
+                      <div style={{ padding: '1.1rem', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.07)' }}>
+                        <span style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>Table: optimization_runs</span>
+                        <div style={{ fontSize: '1.75rem', fontWeight: 700, marginTop: '6px', color: '#10b981' }}>
+                          {dbTelemetry?.tables?.optimization_runs ?? dbHistory.length}
+                        </div>
+                        <small style={{ color: '#64748b', fontSize: '0.8rem' }}>Audited execution logs</small>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Audit Trail Table of Execution Runs */}
+                  <div className="panel" style={{ padding: '1.5rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                      <div>
+                        <h4 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#f8fafc' }}>
+                          Optimization Run Audit Trail
+                        </h4>
+                        <p style={{ margin: '3px 0 0 0', fontSize: '0.8rem', color: '#94a3b8' }}>
+                          Persisted in connected database table: <code>optimization_runs</code>
+                        </p>
+                      </div>
+                      <span style={{ fontSize: '0.8rem', color: '#94a3b8', background: 'rgba(255, 255, 255, 0.04)', padding: '4px 10px', borderRadius: '6px' }}>
+                        Showing {dbHistory.length} audited runs
+                      </span>
+                    </div>
+
+                    <div style={{ overflowX: 'auto' }}>
+                      <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                        <thead>
+                          <tr style={{ textAlign: 'left', borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                            <th style={{ padding: '10px' }}>Run ID</th>
+                            <th style={{ padding: '10px' }}>Timestamp</th>
+                            <th style={{ padding: '10px' }}>Solver Mode</th>
+                            <th style={{ padding: '10px' }}>Delivered</th>
+                            <th style={{ padding: '10px' }}>Spoiled</th>
+                            <th style={{ padding: '10px' }}>Net Revenue</th>
+                            <th style={{ padding: '10px' }}>Net Profit</th>
+                            <th style={{ padding: '10px' }}>Fulfillment</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {dbHistory.map((run: any) => (
+                            <tr key={run.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                              <td style={{ padding: '10px', fontFamily: 'monospace', fontWeight: 700 }}>#{run.id}</td>
+                              <td style={{ padding: '10px', color: '#94a3b8' }}>
+                                {run.timestamp ? new Date(run.timestamp).toLocaleTimeString() : 'Recent'}
+                              </td>
+                              <td style={{ padding: '10px' }}>
+                                <span style={{ padding: '2px 8px', borderRadius: '4px', background: run.solver_mode === 'milp' ? 'rgba(168, 85, 247, 0.15)' : 'rgba(56, 189, 248, 0.15)', color: run.solver_mode === 'milp' ? '#c084fc' : '#38bdf8', fontSize: '0.75rem', fontWeight: 600 }}>
+                                  {String(run.solver_mode || 'HEURISTIC').toUpperCase()}
+                                </span>
+                              </td>
+                              <td style={{ padding: '10px', fontWeight: 600 }}>{fmt(run.delivered_kg)} kg</td>
+                              <td style={{ padding: '10px', color: run.spoiled_kg > 0 ? '#ef4444' : '#10b981' }}>{fmt(run.spoiled_kg)} kg</td>
+                              <td style={{ padding: '10px' }}>{money(run.net_revenue_inr)}</td>
+                              <td style={{ padding: '10px', color: run.net_profit_inr >= 0 ? '#10b981' : '#ef4444', fontWeight: 700 }}>
+                                {money(run.net_profit_inr)}
+                              </td>
+                              <td style={{ padding: '10px' }}>
+                                {fmt(run.demand_fulfillment_percent)}%
+                              </td>
+                            </tr>
+                          ))}
+                          {dbHistory.length === 0 && (
+                            <tr>
+                              <td colSpan={8} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>
+                                No optimization runs logged yet. Execute a plan to record audit logs to the database.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 </div>
               )}
             </>

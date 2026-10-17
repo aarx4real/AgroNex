@@ -24,6 +24,14 @@ try:
     from .validation import ValidationError
     from .data_layer import data_manager
     from .scenarios import list_scenarios, get_scenario
+    from .database import SessionLocal, get_engine_dialect
+    from .db_service import (
+        get_database_telemetry,
+        log_optimization_run,
+        get_optimization_history,
+        init_db,
+        seed_database_if_empty,
+    )
 except ImportError:  # supports direct uvicorn execution
     from engine import build_plan, apply_disruption, explain_plan, plan_distribution
     from models import (
@@ -37,6 +45,14 @@ except ImportError:  # supports direct uvicorn execution
     from validation import ValidationError
     from data_layer import data_manager
     from scenarios import list_scenarios, get_scenario
+    from database import SessionLocal, get_engine_dialect
+    from db_service import (
+        get_database_telemetry,
+        log_optimization_run,
+        get_optimization_history,
+        init_db,
+        seed_database_if_empty,
+    )
 
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BASE_DIR.parent / "frontend"
@@ -74,6 +90,42 @@ def initial_data():
 @app.get("/api/data/status")
 def data_status():
     return data_manager.get_status()
+
+
+@app.get("/api/db/status")
+def db_status():
+    """Returns connected database engine dialect, ORM version, and active table statistics."""
+    session = SessionLocal()
+    try:
+        return get_database_telemetry(session)
+    finally:
+        session.close()
+
+
+@app.get("/api/db/history")
+def db_history(limit: int = 15):
+    """Returns recent optimization execution runs audited in the database."""
+    session = SessionLocal()
+    try:
+        return {"runs": get_optimization_history(session, limit=limit)}
+    finally:
+        session.close()
+
+
+@app.post("/api/db/seed")
+def db_seed():
+    """Resets and re-seeds the connected database from initial verified records."""
+    data_manager.reset_to_snapshot()
+    session = SessionLocal()
+    try:
+        telemetry = get_database_telemetry(session)
+        return {
+            "status": "success",
+            "message": "Database successfully re-seeded via SQLAlchemy ORM.",
+            "telemetry": telemetry,
+        }
+    finally:
+        session.close()
 
 
 @app.post("/api/data/upload")
@@ -186,7 +238,17 @@ def optimize(payload: dict | None = None):
                     if not isinstance(payload[key], list):
                         raise HTTPException(status_code=422, detail=f"{key} must be a list")
                     data[key] = payload[key]
-        return build_plan(data["inventory"], data["destinations"], data["transport"], solver_mode=solver_mode)
+        plan = build_plan(data["inventory"], data["destinations"], data["transport"], solver_mode=solver_mode)
+        # Audit log optimization run into connected database via SQLAlchemy ORM
+        try:
+            session = SessionLocal()
+            try:
+                log_optimization_run(session, plan.get("optimized", plan), solver_mode=solver_mode)
+            finally:
+                session.close()
+        except Exception:
+            pass  # Non-blocking telemetry
+        return plan
     except HTTPException:
         raise
     except ValidationError as exc:

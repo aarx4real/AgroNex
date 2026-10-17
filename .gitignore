@@ -7,3 +7,7 @@ frontend/dist/
 frontend/.env
 .env
 .DS_Store
+*.db
+*.sqlite
+*.sqlite3
+

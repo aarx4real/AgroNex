@@ -26,6 +26,37 @@ from .validation import (
     ValidationError,
 )
 
+try:
+    from .database import SessionLocal
+    from .db_service import (
+        init_db,
+        seed_database_if_empty,
+        get_inventory_batches,
+        add_inventory_batch,
+        delete_inventory_batch,
+        replace_inventory_batches,
+        get_destinations,
+        replace_destinations,
+        get_transport_routes,
+        replace_transport_routes,
+        get_database_telemetry,
+    )
+except ImportError:
+    from database import SessionLocal
+    from db_service import (
+        init_db,
+        seed_database_if_empty,
+        get_inventory_batches,
+        add_inventory_batch,
+        delete_inventory_batch,
+        replace_inventory_batches,
+        get_destinations,
+        replace_destinations,
+        get_transport_routes,
+        replace_transport_routes,
+        get_database_telemetry,
+    )
+
 DATA_DIR = Path(__file__).resolve().parent / "data"
 
 
@@ -315,13 +346,27 @@ class RouteProvider(BaseProvider):
 
 
 class DataManager:
-    """Coordinates data providers, validated snapshots, and CSV templates."""
+    """Coordinates data providers, validated snapshots, and connected database via SQLAlchemy ORM."""
     def __init__(self, data_directory: Path = DATA_DIR):
         self.data_dir = data_directory
         self._load_fallback_snapshots()
-        self.inventory_provider = InventoryProvider(self.raw_inventory)
-        self.price_provider = PriceProvider(self.raw_destinations)
-        self.route_provider = RouteProvider(self.raw_transport)
+
+        # Initialize database tables and seed with initial verified dataset if empty
+        init_db()
+        seed_database_if_empty()
+
+        # Load live data from connected database via ORM
+        session = SessionLocal()
+        try:
+            db_inventory = get_inventory_batches(session)
+            db_destinations = get_destinations(session)
+            db_transport = get_transport_routes(session)
+        finally:
+            session.close()
+
+        self.inventory_provider = InventoryProvider(db_inventory or self.raw_inventory)
+        self.price_provider = PriceProvider(db_destinations or self.raw_destinations)
+        self.route_provider = RouteProvider(db_transport or self.raw_transport)
 
     def _load_fallback_snapshots(self):
         with (self.data_dir / "inventory.json").open("r", encoding="utf-8") as f:
@@ -347,11 +392,7 @@ class DataManager:
         price_stat = self.price_provider.get_status_info()
         route_stat = self.route_provider.get_status_info()
 
-        # Overall network status:
-        # If any is uploaded -> "uploaded"
-        # If any is stale -> "stale"
-        # If all live -> "live"
-        # Otherwise "cached"
+        # Overall network status
         statuses = [inv_stat["status"], price_stat["status"], route_stat["status"]]
         if "stale" in statuses:
             overall = "stale"
@@ -365,11 +406,23 @@ class DataManager:
         timestamps = [inv_stat["last_updated"], price_stat["last_updated"], route_stat["last_updated"]]
         latest_timestamp = max(timestamps)
 
+        # Database Telemetry via SQLAlchemy ORM
+        db_telemetry = {}
+        try:
+            session = SessionLocal()
+            try:
+                db_telemetry = get_database_telemetry(session)
+            finally:
+                session.close()
+        except Exception as exc:
+            db_telemetry = {"status": "error", "error": str(exc)}
+
         return {
             "overall_status": overall,
             "last_updated": latest_timestamp,
             "organization": "AgroNex Regional Supply Network",
             "workspace": "Active Operations Workspace",
+            "database": db_telemetry,
             "providers": {
                 "inventory": inv_stat,
                 "prices": price_stat,
@@ -378,10 +431,24 @@ class DataManager:
         }
 
     def add_batch(self, batch_data: dict[str, Any]) -> list[dict[str, Any]]:
-        return self.inventory_provider.add_batch(batch_data)
+        updated = self.inventory_provider.add_batch(batch_data)
+        # Sync directly to connected database via SQLAlchemy ORM
+        session = SessionLocal()
+        try:
+            add_inventory_batch(session, batch_data)
+        finally:
+            session.close()
+        return updated
 
     def delete_batch(self, batch_id: str) -> list[dict[str, Any]]:
-        return self.inventory_provider.delete_batch(batch_id)
+        updated = self.inventory_provider.delete_batch(batch_id)
+        # Sync directly to connected database via SQLAlchemy ORM
+        session = SessionLocal()
+        try:
+            delete_inventory_batch(session, batch_id)
+        finally:
+            session.close()
+        return updated
 
     def reset_to_snapshot(self):
         self.inventory_provider.revert_to_fallback("Reset by user")
@@ -398,6 +465,15 @@ class DataManager:
         self.route_provider.last_updated = _now_iso()
         self.route_provider.last_error = None
         self.route_provider.fallback_active = False
+
+        # Sync fallback snapshot to connected database via SQLAlchemy ORM
+        session = SessionLocal()
+        try:
+            replace_inventory_batches(session, self.raw_inventory)
+            replace_destinations(session, self.raw_destinations)
+            replace_transport_routes(session, self.raw_transport)
+        finally:
+            session.close()
 
     def generate_template_csv(self, entity_type: str) -> str:
         if entity_type == "inventory":

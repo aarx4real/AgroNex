@@ -1,6 +1,6 @@
-"""AgroNex / FreshRoute Hackathon Technical Benchmark & Automated Stress Test.
+"""AgroNex Technical Benchmark & Automated Stress Test.
 
-Evaluates MoFPI Problem Statement 03 compliance:
+Evaluates perishable supply chain logistics performance:
 - Spoilage reduction vs Baseline
 - Demand fulfillment %
 - Grounded Net Economic Profit (Revenue - Transport - Handling - COGS - Spoilage Penalties)
@@ -91,11 +91,11 @@ def check_physical_constraints(plan: dict, inventory: list[dict], destinations: 
 
 def run_benchmarks():
     print("=" * 115)
-    print(" AgroNex / FreshRoute: MoFPI PS-03 Technical Benchmark & Audit Harness")
+    print(" AgroNex: Technical Benchmark & Automated Stress Test")
     print("=" * 115)
     data = load_dataset()
 
-    header = f"{'Scenario':<26} | {'Mode':<9} | {'Baseline (Rs)':<13} | {'FreshRoute (Rs)':<15} | {'Profit Delta':<12} | {'Spoil Red':<10} | {'Fulfill %':<9} | {'Violations'}"
+    header = f"{'Scenario':<26} | {'Mode':<9} | {'Baseline (Rs)':<13} | {'AgroNex (Rs)':<15} | {'Profit Delta':<12} | {'Spoil Red':<10} | {'Fulfill %':<9} | {'Violations'}"
     print(header)
     print("-" * 115)
 

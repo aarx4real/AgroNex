@@ -1,6 +1,6 @@
 # AgroNex — Intelligent Perishable Produce Distribution
 
-**AgroNex** is a full-stack decision-support MVP for PS 03: *FreshRoute — Intelligent Decision Support for Perishable Produce Distribution*. It recommends which batches to dispatch first, where stock can feasibly go, and which unsold short-life batches may warrant a discount. It compares a transparent baseline against a deterministic optimization heuristic.
+**AgroNex** is an intelligent decision-support platform for agricultural logistics and perishable produce distribution. It recommends which crop batches to dispatch first, evaluates route feasibility based on transit times and handling constraints, flags unsold short-life batches for proactive discounting, and minimizes food loss through shelf-life-aware optimization.
 
 > **Data honesty:** included inventory, demand, prices, routes, and all resulting metrics are synthetic demo data. Results are modeled estimates, not measured real-world gains or a validated production logistics plan.
 
@@ -16,12 +16,12 @@
 - **Tests** for the planner's stock/capacity/demand/shelf-life constraints, accounting, scenarios, and API responses.
 - **AgroNex logo asset** in `frontend/public/agronex-mark.png`.
 
-## 🏛️ 3-Tier Full Stack Architecture (Placement Rubric: 5/5 Marks)
+## 🏛️ System Architecture
 
-AgroNex implements a complete, enterprise-grade 3-tier architecture strictly aligned with placement rubric standards:
+AgroNex is organized into three clean layers: a reactive frontend, an asynchronous FastAPI service layer with linear programming optimization, and a relational persistence layer managed via SQLAlchemy ORM.
 
 ```text
-[ Tier 1: Client / Frontend ]
+[ Client / Frontend ]
 React 18 + TypeScript + Vite + React Router v7 + Recharts
   ├── Client-side routing (/overview, /inventory, /plan, /scenarios, /copilot, /database)
   ├── Real-time UI state management & dynamic reactive charting
@@ -31,7 +31,7 @@ React 18 + TypeScript + Vite + React Router v7 + Recharts
           │ REST API / JSON (HTTP)
           ▼
 
-[ Tier 2: Application / API Server ]
+[ Application / API Server ]
 FastAPI (Python) + Pydantic + PuLP (MILP Solver)
   ├── Strict input validation & data contracts (Pydantic v2)
   ├── Core business logic: Perishable produce shelf-life optimization & MoFPI economics
@@ -42,7 +42,7 @@ FastAPI (Python) + Pydantic + PuLP (MILP Solver)
           │ SQLAlchemy 2.x ORM / Connection Pool
           ▼
 
-[ Tier 3: Database & Persistence Layer ]
+[ Database & Persistence Layer ]
 PostgreSQL (Production via Docker Compose) / SQLite (Zero-config embedded fallback)
   ├── Managed via SQLAlchemy ORM (Session / Declarative Base)
   ├── Tables: `inventory_batches`, `destinations`, `transport_routes`, `optimization_runs`
@@ -50,17 +50,18 @@ PostgreSQL (Production via Docker Compose) / SQLite (Zero-config embedded fallba
   └── Full execution audit trail logging each dispatch plan to DB
 ```
 
-### Full Stack Rubric Breakdown (5 Marks)
+### Architecture Breakdown
 
-| Tier | Requirement | Implementation in AgroNex |
+| Layer | Technologies | Role & Key Responsibilities |
 |---|---|---|
-| **Tier 1 (Frontend)** | React / Next.js / Vue / Angular (State, client routing, UI components) | **React 18 + TypeScript + React Router v7 + Recharts**. Manages real-time inventory state, client-side route navigation, dynamic charting, and direct DB audit views. |
-| **Tier 2 (Backend API)** | Node / Express / FastAPI / Django / Flask / Spring Boot / Go (Business logic & REST endpoints) | **Python FastAPI + Pydantic**. Implements perishable supply-chain optimization (PuLP MILP solver, MoFPI economics), REST API endpoints (`/api/optimize`, `/api/simulate`, `/api/inventory/quick-add`, `/api/db/*`). |
-| **Tier 3 (Database)** | Connected Database (PostgreSQL / MongoDB / MySQL) managed via ORM or direct queries | **PostgreSQL / SQLite via SQLAlchemy 2.x ORM**. Defines declarative models (`InventoryBatchModel`, `DestinationModel`, `TransportRouteModel`, `OptimizationRunModel`), CRUD sessions, and audit logging. |
+| **Frontend** | React 18, TypeScript, React Router v7, Recharts | Interactive operations interface with client-side routing, inventory management, dynamic scenario modeling, and database telemetry monitoring. |
+| **Backend API** | Python, FastAPI, Pydantic | RESTful API managing solver pipelines, inventory mutations, and scenario simulations with strict input validation. |
+| **Optimization Engine** | PuLP (Mixed-Integer Linear Programming) | Shelf-life-aware allocation model minimizing food loss and transportation overhead under MoFPI economic constraints. |
+| **Database Layer** | PostgreSQL / SQLite, SQLAlchemy 2.x ORM | Relational models (`InventoryBatchModel`, `DestinationModel`, `TransportRouteModel`, `OptimizationRunModel`), persistent transactions, and execution history. |
 
-## PS 03 compliance checklist
+## Core Capabilities & Features
 
-| Mandatory item | Where it is implemented |
+| Capability / Feature | Module & Implementation |
 |---|---|
 | Inventory batches with commodity, quantity, remaining shelf life | `backend/db_models.py`, `backend/data/inventory.json`, Inventory view |
 | Connected Relational Database & ORM | `backend/database.py`, `backend/db_models.py`, `backend/db_service.py` |
@@ -134,7 +135,7 @@ From the project root after installing backend requirements:
 - Net value = gross sales value − allocated transport cost − handling cost. Discount suggestions are not treated as sales, and no hypothetical discounted demand is assumed.
 - Unallocated stock whose remaining shelf life is within the planning horizon is modeled as spoilage; other unallocated stock is not automatically called spoiled.
 - The optimizer is a deterministic heuristic, not a proof of global optimality. Compare it against the included baseline on multiple scenarios and inspect all assumptions before claiming performance gains.
-- Live price feeds, real distributor integrations, actual shelf-life sensing, and demand forecasting are not implemented and are not required for the one-day MVP.
+- Live price feeds, real distributor integrations, and actual IoT shelf-life sensing are out of scope for the current local build.
 
 ## Repository hygiene
 

@@ -136,7 +136,3 @@ From the project root after installing backend requirements:
 - Unallocated stock whose remaining shelf life is within the planning horizon is modeled as spoilage; other unallocated stock is not automatically called spoiled.
 - The optimizer is a deterministic heuristic, not a proof of global optimality. Compare it against the included baseline on multiple scenarios and inspect all assumptions before claiming performance gains.
 - Live price feeds, real distributor integrations, and actual IoT shelf-life sensing are out of scope for the current local build.
-
-## Repository hygiene
-
-No secrets or API keys are committed. To use optional OpenAI explanations, set `OPENAI_API_KEY` in the **backend terminal environment** before starting the API. Optional model setting: `AGRONEX_AI_MODEL` (default `gpt-4o-mini`; legacy `FRESHROUTE_AI_MODEL` is also accepted). API usage may incur charges. If unset, the built-in explanation works without an external AI service.
